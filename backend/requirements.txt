@@ -1,0 +1,8 @@
+# Runtime dependencies
+boto3
+
+# Testing dependencies
+pytest
+hypothesis
+moto[s3,dynamodb,ses]
+python-dateutil

@@ -1,0 +1,642 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Purdy Renting Platform - serverless infrastructure (SAM).
+  Provisions DynamoDB, S3, API Gateway (Cognito + API key auth), six Lambda
+  functions with least-privilege IAM, Cognito User Pool federated with
+  Microsoft Entra ID (OIDC), SES sender identity, and a CloudFront distribution
+  for the React SPA.
+  Requirements: 1.1, 1.2, 10.1, 10.2, 10.5
+
+# --------------------------------------------------------------------------- #
+# Parameters - environment-specific values. Replace placeholder defaults per   #
+# environment (dev/staging/prod) at deploy time via --parameter-overrides.     #
+# --------------------------------------------------------------------------- #
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+    Description: Deployment environment name (used as a resource name suffix).
+
+  FrontendDomain:
+    Type: String
+    Default: https://app.purdyrenting.example.com
+    Description: >
+      Fully-qualified origin of the React SPA (scheme + host). Used for the S3
+      CORS allowed origin and the Cognito callback/logout URLs.
+
+  SesSenderEmail:
+    Type: String
+    Default: no-reply@purdyrenting.example.com
+    Description: >
+      Verified SES sender address used for submission confirmation emails.
+      NOTE: SES requires this identity to be verified out of band (via the
+      SES console, DNS records, or CreateEmailIdentity). In the SES sandbox,
+      recipient addresses must also be verified.
+
+  EntraClientId:
+    Type: String
+    Default: ENTRA_CLIENT_ID_PLACEHOLDER
+    Description: Microsoft Entra ID application (client) ID for OIDC federation.
+
+  EntraClientSecret:
+    Type: String
+    Default: ENTRA_CLIENT_SECRET_PLACEHOLDER
+    NoEcho: true
+    Description: Microsoft Entra ID application client secret for OIDC federation.
+
+  EntraOidcIssuer:
+    Type: String
+    Default: https://login.microsoftonline.com/TENANT_ID_PLACEHOLDER/v2.0
+    Description: >
+      Microsoft Entra ID OIDC issuer URL. Cognito uses this to discover the
+      OIDC endpoints (.well-known/openid-configuration).
+
+  CognitoDomainPrefix:
+    Type: String
+    Default: purdy-renting
+    Description: >
+      Prefix for the Cognito hosted UI domain. Must be globally unique within
+      the AWS region (final domain: {prefix}-{env}.auth.{region}.amazoncognito.com).
+
+  # ---- UiPath Orchestrator (disparo de job desde CreateRequest) ----
+  UiPathTokenUrl:
+    Type: String
+    Default: https://cloud.uipath.com/identity_/connect/token
+    Description: Identity server URL para autenticacion (client_credentials).
+
+  UiPathClientId:
+    Type: String
+    Default: 8f64dac1-9ba3-4e42-a0f3-ca11aaff7dc2
+    Description: client_id de la aplicacion externa de UiPath.
+
+  UiPathClientSecret:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: >
+      client_secret de UiPath. Dejar vacio en la plantilla y proveerlo en el
+      deploy (o desde Secrets Manager). NO versionar el secreto en texto plano.
+
+  UiPathScope:
+    Type: String
+    Default: OR.Jobs OR.Execution OR.Folders
+    Description: Scopes OAuth solicitados a UiPath.
+
+  UiPathJobsUrl:
+    Type: String
+    Default: https://cloud.uipath.com/grupopurdyrentingcommunity/DefaultTenant/orchestrator_/odata/Jobs/UiPath.Server.Configuration.OData.StartJobs
+    Description: Endpoint OData StartJobs de Orchestrator.
+
+  UiPathReleaseKey:
+    Type: String
+    Default: 94b379af-77fa-4320-b792-1682ef8171ac
+    Description: ReleaseKey del proceso a ejecutar.
+
+  UiPathOrgUnitId:
+    Type: String
+    Default: "8073429"
+    Description: X-UIPATH-OrganizationUnitId (folder) del job.
+
+# --------------------------------------------------------------------------- #
+# Globals - defaults shared by all serverless functions.                       #
+# --------------------------------------------------------------------------- #
+Globals:
+  Function:
+    Runtime: python3.11
+    Timeout: 30
+    MemorySize: 256
+    Architectures:
+      - x86_64
+    Environment:
+      Variables:
+        REQUESTS_TABLE: !Ref RequestsTable
+        FILES_BUCKET: !Ref FilesBucket
+
+Resources:
+  # ------------------------------------------------------------------------- #
+  # DynamoDB - single-table design with GSI1 for user queries.                 #
+  # ------------------------------------------------------------------------- #
+  RequestsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "PurdyRentingRequests-${EnvironmentName}"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      SSESpecification:
+        SSEEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+  # ------------------------------------------------------------------------- #
+  # S3 - file storage for uploaded and generated files. SSE-S3, CORS, no       #
+  # public access (Requirements 10.2, 10.5).                                   #
+  # ------------------------------------------------------------------------- #
+  FilesBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "purdy-renting-files-${EnvironmentName}-${AWS::AccountId}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      CorsConfiguration:
+        CorsRules:
+          - AllowedOrigins:
+              - !Ref FrontendDomain
+            AllowedMethods:
+              - PUT
+              - GET
+            AllowedHeaders:
+              - "*"
+            ExposedHeaders:
+              - ETag
+            MaxAge: 3000
+
+  # ------------------------------------------------------------------------- #
+  # Cognito - User Pool federated with Microsoft Entra ID via OIDC             #
+  # (Requirements 1.1, 1.2).                                                   #
+  # ------------------------------------------------------------------------- #
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub "purdy-renting-${EnvironmentName}"
+      # Federated identities only; no local sign-up.
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true
+      UsernameAttributes:
+        - email
+      AutoVerifiedAttributes:
+        - email
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Mutable: true
+          Required: true
+        - Name: name
+          AttributeDataType: String
+          Mutable: true
+          Required: false
+
+  EntraIdentityProvider:
+    Type: AWS::Cognito::UserPoolIdentityProvider
+    Properties:
+      UserPoolId: !Ref UserPool
+      ProviderName: EntraID
+      ProviderType: OIDC
+      ProviderDetails:
+        client_id: !Ref EntraClientId
+        client_secret: !Ref EntraClientSecret
+        oidc_issuer: !Ref EntraOidcIssuer
+        attributes_request_method: GET
+        authorize_scopes: "openid email profile"
+      AttributeMapping:
+        email: email
+        name: name
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    # Ensure the IdP exists before the client references it.
+    DependsOn: EntraIdentityProvider
+    Properties:
+      ClientName: !Sub "purdy-renting-web-${EnvironmentName}"
+      UserPoolId: !Ref UserPool
+      GenerateSecret: false
+      SupportedIdentityProviders:
+        - EntraID
+      AllowedOAuthFlows:
+        - code
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthScopes:
+        - openid
+        - email
+        - profile
+      CallbackURLs:
+        - !Sub "${FrontendDomain}/callback"
+      LogoutURLs:
+        - !Sub "${FrontendDomain}/login"
+      # Token lifetimes per design: 60 min access/ID, 30 day refresh.
+      AccessTokenValidity: 60
+      IdTokenValidity: 60
+      RefreshTokenValidity: 30
+      TokenValidityUnits:
+        AccessToken: minutes
+        IdToken: minutes
+        RefreshToken: days
+      ExplicitAuthFlows:
+        - ALLOW_REFRESH_TOKEN_AUTH
+        - ALLOW_USER_SRP_AUTH
+
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: !Sub "${CognitoDomainPrefix}-${EnvironmentName}"
+      UserPoolId: !Ref UserPool
+
+  # ------------------------------------------------------------------------- #
+  # SES - sender identity for confirmation emails (Requirement 5).             #
+  # NOTE: creating the identity here does NOT complete verification; the       #
+  # address/domain must be verified out of band before sending succeeds.       #
+  # ------------------------------------------------------------------------- #
+  SesSenderIdentity:
+    Type: AWS::SES::EmailIdentity
+    Properties:
+      EmailIdentity: !Ref SesSenderEmail
+
+  # ------------------------------------------------------------------------- #
+  # API Gateway - REST API with a Cognito authorizer plus API-key auth for     #
+  # the Robot endpoints (Requirements 10.1, 10.6, 7.7, 7.8).                   #
+  # ------------------------------------------------------------------------- #
+  Api:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub "purdy-renting-api-${EnvironmentName}"
+      StageName: !Ref EnvironmentName
+      # API keys are required only on methods that opt in via ApiKeyRequired.
+      ApiKeySourceType: HEADER
+      Cors:
+        AllowMethods: "'GET,POST,PUT,OPTIONS'"
+        AllowHeaders: "'Content-Type,Authorization,X-Api-Key'"
+        AllowOrigin: !Sub "'${FrontendDomain}'"
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn: !GetAtt UserPool.Arn
+            Identity:
+              Header: Authorization
+        # Usage plan + API key for machine-to-machine (Robot) endpoints.
+        ApiKeyRequired: false
+        UsagePlan:
+          CreateUsagePlan: PER_API
+          UsagePlanName: !Sub "purdy-renting-robot-plan-${EnvironmentName}"
+          Description: Usage plan for the RPA Robot endpoints.
+          Throttle:
+            BurstLimit: 20
+            RateLimit: 10
+          Quota:
+            Limit: 10000
+            Period: DAY
+
+  # ------------------------------------------------------------------------- #
+  # Gateway responses - ensure CORS headers are present on error responses     #
+  # that API Gateway generates BEFORE reaching a Lambda (e.g. 401/403 from the #
+  # Cognito authorizer or the API-key check, 4XX validation errors, and 5XX    #
+  # server errors). The SAM `Cors` block above only adds headers to the OPTIONS #
+  # preflight mock and to successful proxy responses, so without these the      #
+  # browser blocks the frontend from reading gateway-generated error bodies.    #
+  # (Requirements 7.8, 10.6)                                                    #
+  # ------------------------------------------------------------------------- #
+  GatewayResponseDefault4XX:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      RestApiId: !Ref Api
+      # Covers 400/401/403/404/409 etc. - including the 401 from a missing/
+      # invalid API key (Req 7.8) and 4XX validation errors.
+      ResponseType: DEFAULT_4XX
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Origin: !Sub "'${FrontendDomain}'"
+        gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Api-Key'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'GET,POST,PUT,OPTIONS'"
+
+  GatewayResponseDefault5XX:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      RestApiId: !Ref Api
+      ResponseType: DEFAULT_5XX
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Origin: !Sub "'${FrontendDomain}'"
+        gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Api-Key'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'GET,POST,PUT,OPTIONS'"
+
+  # ------------------------------------------------------------------------- #
+  # Lambda functions. CodeUri points at ../backend; handlers are               #
+  # handlers/<module>.handler. Each function gets a scoped IAM policy.         #
+  # ------------------------------------------------------------------------- #
+
+  # --- Cognito-authenticated user endpoints -------------------------------- #
+  GetPresignedUrlFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "purdy-GetPresignedUrl-${EnvironmentName}"
+      CodeUri: ../backend
+      Handler: handlers/get_presigned_url.handler
+      Policies:
+        # Presigned PUT URL generation needs the ability to put objects.
+        - Statement:
+            - Effect: Allow
+              Action:
+                - s3:PutObject
+              Resource: !Sub "${FilesBucket.Arn}/*"
+      Events:
+        PostPresignedUrl:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /requests/presigned-url
+            Method: post
+
+  CreateRequestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "purdy-CreateRequest-${EnvironmentName}"
+      CodeUri: ../backend
+      Handler: handlers/create_request.handler
+      Environment:
+        Variables:
+          SES_SENDER_EMAIL: !Ref SesSenderEmail
+          # UiPath Orchestrator (disparo de job tras crear la solicitud).
+          # NOTA: el client_secret debe provenir de Secrets Manager en prod.
+          UIPATH_TOKEN_URL: !Ref UiPathTokenUrl
+          UIPATH_CLIENT_ID: !Ref UiPathClientId
+          UIPATH_CLIENT_SECRET: !Ref UiPathClientSecret
+          UIPATH_SCOPE: !Ref UiPathScope
+          UIPATH_JOBS_URL: !Ref UiPathJobsUrl
+          UIPATH_RELEASE_KEY: !Ref UiPathReleaseKey
+          UIPATH_ORG_UNIT_ID: !Ref UiPathOrgUnitId
+      Policies:
+        - Statement:
+            # Write the new request record.
+            - Effect: Allow
+              Action:
+                - dynamodb:PutItem
+              Resource: !GetAtt RequestsTable.Arn
+            # Verify uploaded files exist (HeadObject -> s3:GetObject).
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+              Resource: !Sub "${FilesBucket.Arn}/*"
+            # Send confirmation email via SES from the verified sender.
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+                - ses:SendRawEmail
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  ses:FromAddress: !Ref SesSenderEmail
+      Events:
+        PostRequest:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /requests
+            Method: post
+
+  GetRequestsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "purdy-GetRequests-${EnvironmentName}"
+      CodeUri: ../backend
+      Handler: handlers/get_requests.handler
+      Policies:
+        - Statement:
+            # Query the GSI1 index for the user's requests.
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+              Resource:
+                - !GetAtt RequestsTable.Arn
+                - !Sub "${RequestsTable.Arn}/index/GSI1"
+      Events:
+        GetRequestsEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /requests
+            Method: get
+
+  GetDownloadUrlFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "purdy-GetDownloadUrl-${EnvironmentName}"
+      CodeUri: ../backend
+      Handler: handlers/get_download_url.handler
+      Policies:
+        - Statement:
+            # Read the request record to enforce ownership.
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+              Resource: !GetAtt RequestsTable.Arn
+            # Presigned GET URL generation needs object read access.
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+              Resource: !Sub "${FilesBucket.Arn}/*"
+      Events:
+        GetDownload:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /requests/{id}/download
+            Method: get
+
+  # --- API-key authenticated Robot endpoints ------------------------------- #
+  UpdateStatusFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "purdy-UpdateStatus-${EnvironmentName}"
+      CodeUri: ../backend
+      Handler: handlers/update_status.handler
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:UpdateItem
+              Resource: !GetAtt RequestsTable.Arn
+      Events:
+        PutStatus:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /requests/{id}/status
+            Method: put
+            # Robot auth: API key, not Cognito.
+            Auth:
+              Authorizer: NONE
+              ApiKeyRequired: true
+
+  UploadGeneratedFileFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "purdy-UploadGeneratedFile-${EnvironmentName}"
+      CodeUri: ../backend
+      Handler: handlers/upload_generated_file.handler
+      # Base64 payloads up to 50 MB decoded; allow extra memory/time.
+      MemorySize: 512
+      Timeout: 60
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:UpdateItem
+              Resource: !GetAtt RequestsTable.Arn
+            - Effect: Allow
+              Action:
+                - s3:PutObject
+              Resource: !Sub "${FilesBucket.Arn}/*"
+      Events:
+        PostFile:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /requests/{id}/file
+            Method: post
+            Auth:
+              Authorizer: NONE
+              ApiKeyRequired: true
+
+  # ------------------------------------------------------------------------- #
+  # CloudFront + site bucket for the built React SPA.                          #
+  # The site bucket is separate from the file-storage bucket. Access is        #
+  # restricted to CloudFront via Origin Access Control (no public access).     #
+  # ------------------------------------------------------------------------- #
+  SiteBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "purdy-renting-site-${EnvironmentName}-${AWS::AccountId}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  SiteOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "purdy-renting-site-oac-${EnvironmentName}"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  SiteDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub "Purdy Renting SPA (${EnvironmentName})"
+        DefaultRootObject: index.html
+        # SPA client-side routing: serve index.html for 403/404.
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+        Origins:
+          - Id: SiteS3Origin
+            DomainName: !GetAtt SiteBucket.RegionalDomainName
+            OriginAccessControlId: !Ref SiteOriginAccessControl
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+        DefaultCacheBehavior:
+          TargetOriginId: SiteS3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          # AWS managed CachingOptimized policy id.
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          CachedMethods:
+            - GET
+            - HEAD
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+
+  # Bucket policy allowing only this CloudFront distribution to read objects.
+  SiteBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref SiteBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowCloudFrontServicePrincipalReadOnly
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub "${SiteBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${SiteDistribution.Id}"
+
+# --------------------------------------------------------------------------- #
+# Outputs - values needed by the frontend build and Robot integration.         #
+# --------------------------------------------------------------------------- #
+Outputs:
+  ApiBaseUrl:
+    Description: Base URL of the REST API.
+    Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/${EnvironmentName}"
+
+  RequestsTableName:
+    Description: DynamoDB requests table name.
+    Value: !Ref RequestsTable
+
+  FilesBucketName:
+    Description: S3 bucket for uploaded and generated files.
+    Value: !Ref FilesBucket
+
+  UserPoolId:
+    Description: Cognito User Pool ID.
+    Value: !Ref UserPool
+
+  UserPoolClientId:
+    Description: Cognito User Pool App Client ID (for the SPA).
+    Value: !Ref UserPoolClient
+
+  CognitoHostedUiDomain:
+    Description: Cognito hosted UI domain.
+    Value: !Sub "https://${CognitoDomainPrefix}-${EnvironmentName}.auth.${AWS::Region}.amazoncognito.com"
+
+  SiteBucketName:
+    Description: S3 bucket that hosts the built React SPA.
+    Value: !Ref SiteBucket
+
+  CloudFrontDomain:
+    Description: CloudFront domain serving the SPA.
+    Value: !GetAtt SiteDistribution.DomainName
+
+  RobotApiKeyId:
+    Description: >
+      ID of the API key auto-created by the SAM usage plan for the Robot
+      endpoints. Retrieve the secret value via the API Gateway console/CLI.
+    Value: !Ref ApiApiKey

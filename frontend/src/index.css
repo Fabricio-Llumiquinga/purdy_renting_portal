@@ -1,0 +1,265 @@
+/* ============================================================
+   Sistema visual Any2cloud - Manual de Identidad v1.0 (2026)
+   Color: magenta = marca, naranja = acento, lima = exito.
+   Tipografia: Calibri (Bold/Regular). Fondos claros dominantes.
+   ============================================================ */
+
+:root {
+  --a2c-magenta: #AF2D76;
+  --a2c-magenta-dark: #8E2360;
+  --a2c-naranja: #E39D3C;
+  --a2c-lima: #75C12D;
+  --a2c-tinta: #2B2B2B;
+  --a2c-gris: #7A6B73;
+
+  --a2c-tinte-magenta: #F6E4EE;
+  --a2c-tinte-naranja: #FBEEDD;
+  --a2c-tinte-lima: #EEF6E2;
+  --a2c-fondo: #FBF4F7;
+
+  --a2c-degradado: linear-gradient(120deg, #AF2D76 0%, #C74C63 45%, #E39D3C 100%);
+
+  --a2c-radio: 14px;
+  --a2c-sombra: 0 2px 10px rgba(43, 43, 43, 0.06);
+  --a2c-borde: #ECE1E8;
+
+  font-family: Calibri, "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+  line-height: 1.5;
+  color: var(--a2c-tinta);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background: var(--a2c-fondo);
+}
+
+.app-shell { min-height: 100vh; display: flex; flex-direction: column; }
+
+/* ---- Encabezado: arquetipo de impacto (degradado + wordmark inverso) ---- */
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.75rem;
+  background: var(--a2c-degradado);
+  color: #fff;
+}
+.app-header__brand { display: flex; align-items: center; gap: 0.6rem; }
+.app-header__logo-cloud {
+  width: 30px; height: 30px;
+  border-radius: 50% 50% 45% 45%;
+  background: #fff;
+  position: relative;
+  flex: none;
+}
+.app-header__logo-cloud::before,
+.app-header__logo-cloud::after {
+  content: ""; position: absolute; background: #fff; border-radius: 50%;
+}
+.app-header__logo-cloud::before { width: 16px; height: 16px; top: -6px; left: 3px; }
+.app-header__logo-cloud::after  { width: 12px; height: 12px; top: -4px; left: 15px; }
+.app-header__title {
+  font-size: 1.35rem; margin: 0; font-weight: 700; letter-spacing: 0.5px;
+}
+.app-header__title-2 { color: var(--a2c-lima); }
+
+.app-header__product {
+  margin-left: 0.75rem;
+  padding-left: 0.75rem;
+  border-left: 1px solid rgba(255,255,255,0.45);
+  font-size: 0.95rem;
+  font-weight: 400;
+  opacity: 0.95;
+}
+
+.app-header__user { display: flex; align-items: center; gap: 0.85rem; }
+.app-header__user-name { font-size: 0.9rem; opacity: 0.95; }
+.app-header__logout {
+  background: rgba(255,255,255,0.18);
+  color: #fff;
+  border: 1px solid rgba(255,255,255,0.5);
+  padding: 0.42rem 0.9rem;
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.app-header__logout:hover:not(:disabled) { background: rgba(255,255,255,0.28); }
+.app-header__logout:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* ---- Banner modo demo (tinte naranja, acento) ---- */
+.demo-banner {
+  background: var(--a2c-tinte-naranja);
+  color: #8a5a12;
+  padding: 0.5rem 1.75rem;
+  font-size: 0.85rem;
+  border-bottom: 1px solid #f0d9b4;
+}
+
+/* ---- Navegacion ---- */
+.app-nav {
+  display: flex;
+  gap: 0.4rem;
+  padding: 0.8rem 1.75rem;
+  background: #fff;
+  border-bottom: 1px solid var(--a2c-borde);
+}
+.app-nav a {
+  text-decoration: none;
+  color: var(--a2c-magenta);
+  padding: 0.45rem 1rem;
+  border-radius: 8px;
+  font-weight: 700;
+  font-size: 0.92rem;
+}
+.app-nav a:hover { background: var(--a2c-tinte-magenta); }
+.app-nav a.active { background: var(--a2c-magenta); color: #fff; }
+
+/* ---- Contenido ---- */
+.app-content { padding: 2rem 1.75rem; max-width: 980px; width: 100%; margin: 0 auto; }
+
+/* ---- Tarjetas / contenedores (firma visual Any2cloud) ---- */
+.request-form {
+  background: #fff;
+  border: 1px solid var(--a2c-borde);
+  border-radius: var(--a2c-radio);
+  box-shadow: var(--a2c-sombra);
+  padding: 1.75rem;
+}
+
+/* H2 con linea naranja debajo (arquetipo Contenido) */
+.request-form__title {
+  margin: 0 0 1.5rem;
+  color: var(--a2c-tinta);
+  font-size: 1.6rem;
+  font-weight: 700;
+  padding-bottom: 0.5rem;
+  position: relative;
+}
+.request-form__title::after {
+  content: "";
+  position: absolute; left: 0; bottom: 0;
+  width: 64px; height: 3px;
+  background: var(--a2c-naranja);
+  border-radius: 2px;
+}
+
+.file-upload, .company-selector {
+  margin-bottom: 1.35rem;
+  display: flex; flex-direction: column; gap: 0.4rem;
+}
+.file-upload__label, .company-selector label {
+  font-weight: 700; font-size: 0.9rem; color: var(--a2c-tinta);
+}
+.file-upload__input, .company-selector select {
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--a2c-borde);
+  border-radius: 9px;
+  background: #fff;
+  font-family: inherit;
+  font-size: 0.92rem;
+  color: var(--a2c-tinta);
+}
+.file-upload__input:focus, .company-selector select:focus {
+  outline: none;
+  border-color: var(--a2c-magenta);
+  box-shadow: 0 0 0 3px var(--a2c-tinte-magenta);
+}
+.file-upload__filename { font-size: 0.85rem; color: var(--a2c-gris); margin: 0.25rem 0 0; }
+
+.file-upload__error, .company-selector__error, .request-form__error, .request-row__error {
+  color: var(--a2c-magenta);
+  font-size: 0.85rem;
+  margin: 0.25rem 0 0;
+}
+
+.file-upload__progress { display: flex; align-items: center; gap: 0.6rem; }
+.file-upload__progress-bar { flex: 1; height: 8px; accent-color: var(--a2c-magenta); }
+.file-upload__progress-bar::-webkit-progress-value { background: var(--a2c-magenta); }
+.file-upload__progress-bar::-webkit-progress-bar { background: var(--a2c-tinte-magenta); }
+.file-upload__progress-text { font-size: 0.82rem; color: var(--a2c-gris); }
+.file-upload__cancel { border: none; background: none; color: var(--a2c-magenta); cursor: pointer; font-family: inherit; }
+
+/* ---- Boton principal (marca = magenta) ---- */
+.request-form__submit {
+  background: var(--a2c-magenta);
+  color: #fff;
+  border: none;
+  padding: 0.7rem 1.6rem;
+  border-radius: 9px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  margin-top: 0.5rem;
+}
+.request-form__submit:hover:not(:disabled) { background: var(--a2c-magenta-dark); }
+.request-form__submit:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* Confirmacion = estado positivo -> tinte lima (semantica de exito) */
+.request-form__confirmation {
+  background: var(--a2c-tinte-lima);
+  border: 1px solid #cfe8b0;
+  border-left: 4px solid var(--a2c-lima);
+  color: #3d6b12;
+  padding: 0.85rem 1.1rem;
+  border-radius: 10px;
+  margin-bottom: 1.25rem;
+}
+.request-form__confirmation strong { color: var(--a2c-tinta); }
+
+/* ---- Tabla de seguimiento ---- */
+.request-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+  border: 1px solid var(--a2c-borde);
+  border-radius: var(--a2c-radio);
+  overflow: hidden;
+  box-shadow: var(--a2c-sombra);
+}
+.request-table th, .request-table td {
+  text-align: left;
+  padding: 0.8rem 1rem;
+  border-bottom: 1px solid var(--a2c-borde);
+  font-size: 0.9rem;
+}
+.request-table th {
+  background: var(--a2c-tinte-magenta);
+  color: var(--a2c-magenta);
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+.request-table tr:last-child td { border-bottom: none; }
+.request-table tbody tr:hover { background: var(--a2c-fondo); }
+
+.request-row__download-link {
+  background: none; border: none;
+  color: var(--a2c-magenta);
+  text-decoration: underline;
+  cursor: pointer; padding: 0;
+  font-family: inherit; font-size: 0.9rem;
+}
+.request-row__download-link:disabled { color: var(--a2c-gris); cursor: default; }
+.request-row__generado--empty { color: var(--a2c-gris); }
+
+/* ---- Badges de estado (semantica de color) ---- */
+.status-badge {
+  display: inline-block;
+  padding: 0.22rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+.status-badge--ok { background: var(--a2c-tinte-lima); color: #3d6b12; }
+.status-badge--progress { background: var(--a2c-tinte-naranja); color: #8a5a12; }
+.status-badge--pending { background: #efe8ec; color: var(--a2c-gris); }
+.status-badge--failed { background: var(--a2c-tinte-magenta); color: var(--a2c-magenta); }
+
+.request-table__loading, .request-table__empty, .request-table__error {
+  padding: 1.1rem; color: var(--a2c-gris);
+}
+.request-table__error { color: var(--a2c-magenta); }

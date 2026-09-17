@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "purdy-renting-backend"
+version = "0.1.0"
+description = "Backend Lambda functions for the Purdy Renting price list request platform"
+requires-python = ">=3.11"
+dependencies = [
+    "boto3",
+    "python-dateutil",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "hypothesis",
+    "moto[s3,dynamodb,ses]",
+]
+
+[tool.setuptools]
+packages = ["handlers", "services", "utils"]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-ra -q"
+
+[tool.hypothesis]
+max_examples = 100

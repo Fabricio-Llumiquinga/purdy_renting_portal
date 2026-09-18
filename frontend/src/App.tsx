@@ -5,15 +5,12 @@
 
 import { BrowserRouter, Routes, Route, Navigate, NavLink } from 'react-router-dom';
 import { ProtectedRoute } from './components/Auth/ProtectedRoute';
+import { LoginPage } from './components/Auth/LoginPage';
 import { Header } from './components/Layout/Header';
 import { ErrorBoundary } from './components/Layout/ErrorBoundary';
 import { RequestForm } from './components/Request/RequestForm';
 import { RequestTable } from './components/Tracking/RequestTable';
 import { IS_DEMO_MODE } from './config/demo';
-
-function AuthRedirectScreen() {
-  return <div role="status">Procesando inicio de sesion&hellip;</div>;
-}
 
 function AppLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -38,8 +35,7 @@ function App() {
     <ErrorBoundary>
       <BrowserRouter>
         <Routes>
-          <Route path="/callback" element={<AuthRedirectScreen />} />
-          <Route path="/login" element={<AuthRedirectScreen />} />
+          <Route path="/login" element={<LoginPage />} />
 
           <Route
             path="/"

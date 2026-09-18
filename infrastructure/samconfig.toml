@@ -1,0 +1,10 @@
+version = 0.1
+
+[staging.deploy.parameters]
+stack_name = "purdy-renting-staging"
+region = "us-east-1"
+resolve_s3 = true
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = false
+fail_on_empty_changeset = false
+parameter_overrides = "ParameterKey=EnvironmentName,ParameterValue=staging ParameterKey=EnablePitr,ParameterValue=false ParameterKey=FrontendDomain,ParameterValue=https://d2vkb6u9wknw8p.cloudfront.net ParameterKey=IntegrationsSecretArn,ParameterValue=arn:aws:secretsmanager:us-east-1:816069124226:secret:purdy-renting/staging/integrations-DA5tOj ParameterKey=UiPathClientSecret,ParameterValue= ParameterKey=NotificationWebhookUrl,ParameterValue="

@@ -263,3 +263,102 @@ body {
   padding: 1.1rem; color: var(--a2c-gris);
 }
 .request-table__error { color: var(--a2c-magenta); }
+
+/* ---- Pagina de login (Cognito nativo, formulario propio) ---------------- */
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--a2c-degradado);
+  padding: 24px;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 380px;
+  background: #fff;
+  border-radius: var(--a2c-radio);
+  box-shadow: 0 8px 30px rgba(43, 43, 43, 0.18);
+  padding: 32px 28px;
+}
+
+.login-brand {
+  text-align: center;
+  margin-bottom: 24px;
+}
+
+.login-brand .app-header__title {
+  color: var(--a2c-magenta);
+}
+
+.login-brand .app-header__product {
+  display: block;
+  color: var(--a2c-gris);
+  font-size: 0.9rem;
+  margin-top: 4px;
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.login-form h2 {
+  margin: 0 0 8px;
+  color: var(--a2c-tinta);
+  font-size: 1.25rem;
+}
+
+.login-form label {
+  font-size: 0.85rem;
+  color: var(--a2c-gris);
+  margin-top: 6px;
+}
+
+.login-form input {
+  padding: 10px 12px;
+  border: 1px solid var(--a2c-borde);
+  border-radius: 10px;
+  font-size: 0.95rem;
+}
+
+.login-form input:focus {
+  outline: none;
+  border-color: var(--a2c-magenta);
+  box-shadow: 0 0 0 3px var(--a2c-tinte-magenta);
+}
+
+.login-form button {
+  margin-top: 16px;
+  padding: 11px 16px;
+  border: none;
+  border-radius: 10px;
+  background: var(--a2c-magenta);
+  color: #fff;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.login-form button:hover:not(:disabled) {
+  background: var(--a2c-magenta-dark);
+}
+
+.login-form button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.login-error {
+  color: #b3261e;
+  font-size: 0.85rem;
+  margin: 8px 0 0;
+}
+
+.login-hint {
+  color: var(--a2c-gris);
+  font-size: 0.85rem;
+  margin: 0 0 8px;
+}

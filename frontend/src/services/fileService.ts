@@ -29,7 +29,8 @@ async function getAccessToken(): Promise<string | null> {
   if (IS_LOCAL_MODE) return null;
   try {
     const session = await fetchAuthSession();
-    const token = session.tokens?.accessToken?.toString();
+    // ID token: contiene los claims email/name que exige el backend.
+    const token = session.tokens?.idToken?.toString();
     if (!token) {
       throw new FileServiceError("No hay una sesion activa. Inicie sesion nuevamente.", { status: 401 });
     }

@@ -45,8 +45,12 @@ export async function createRequest(payload: CreateRequestPayload): Promise<Crea
 
 export async function getRequests(): Promise<Request[]> {
   try {
-    const response = await apiClient.get<Request[]>('/requests');
-    return response.data;
+    // El backend responde { requests: [...] }. Extraemos el array y toleramos
+    // que venga como arreglo directo por robustez.
+    const response = await apiClient.get<{ requests?: Request[] } | Request[]>('/requests');
+    const data = response.data;
+    if (Array.isArray(data)) return data;
+    return data?.requests ?? [];
   } catch (err) {
     throw toSpanishError(err);
   }

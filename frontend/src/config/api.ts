@@ -71,9 +71,12 @@ export const apiClient: AxiosInstance = axios.create({
 apiClient.interceptors.request.use(async (config) => {
   try {
     const session = await fetchAuthSession();
-    const accessToken = session.tokens?.accessToken?.toString();
-    if (accessToken) {
-      config.headers.Authorization = `Bearer ${accessToken}`;
+    // Usar el ID token: el authorizer Cognito y el backend leen claims como
+    // "email"/"name", que SOLO estan presentes en el ID token (el access token
+    // de Cognito no incluye esos atributos de perfil).
+    const idToken = session.tokens?.idToken?.toString();
+    if (idToken) {
+      config.headers.Authorization = `Bearer ${idToken}`;
     }
   } catch {
     // No valid session; let the request proceed and let the backend reject it.

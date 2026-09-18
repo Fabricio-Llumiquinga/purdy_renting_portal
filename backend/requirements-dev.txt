@@ -1,0 +1,7 @@
+# Dependencias de desarrollo / testing (NO se empaquetan en las Lambdas).
+# Instalar con: pip install -r requirements-dev.txt
+-r requirements.txt
+boto3
+pytest
+hypothesis
+moto[s3,dynamodb,ses]

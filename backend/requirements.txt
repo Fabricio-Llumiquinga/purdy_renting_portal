@@ -1,8 +1,5 @@
-# Runtime dependencies
-boto3
-
-# Testing dependencies
-pytest
-hypothesis
-moto[s3,dynamodb,ses]
+# Runtime dependencies (solo lo necesario en Lambda).
+# boto3/botocore ya vienen incluidos en el runtime de AWS Lambda, no se empaquetan.
+# Las dependencias de testing (pytest, hypothesis, moto) NO van aqui:
+# instalarlas aparte con `pip install -e .[test]` o desde requirements-dev.txt.
 python-dateutil

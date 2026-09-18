@@ -61,10 +61,36 @@ UIPATH_ORG_UNIT_ID = os.environ.get("UIPATH_ORG_UNIT_ID", "8073429")
 # Timeout de red (segundos) para cada llamada HTTP.
 _HTTP_TIMEOUT = int(os.environ.get("UIPATH_HTTP_TIMEOUT", "30"))
 
+# User-Agent explicito: el identity server de UiPath (tras Cloudflare) responde
+# 403 al User-Agent por defecto de urllib. Un UA de navegador/cliente comun pasa.
+_USER_AGENT = os.environ.get(
+    "UIPATH_USER_AGENT",
+    "Mozilla/5.0 (compatible; PurdyRentingBackend/1.0)",
+)
+
 
 # --------------------------------------------------------------------------- #
 # Paso 1: Authenticate
 # --------------------------------------------------------------------------- #
+
+
+def _resolve_client_secret() -> str:
+    """Obtiene el client_secret desde Secrets Manager, con fallback a env.
+
+    Prioridad: Secrets Manager (clave ``uipath_client_secret``) -> variable de
+    entorno ``UIPATH_CLIENT_SECRET``. Nunca lanza excepcion.
+    """
+    try:
+        from services.secrets import get_secret_value
+
+        value = get_secret_value(
+            "uipath_client_secret", env_fallback="UIPATH_CLIENT_SECRET"
+        )
+        if value:
+            return value
+    except Exception:  # noqa: BLE001 - fallback silencioso a env global
+        logger.warning("No se pudo resolver el secreto de UiPath; se usa env.", exc_info=True)
+    return UIPATH_CLIENT_SECRET
 
 
 def _authenticate() -> Optional[str]:
@@ -74,9 +100,10 @@ def _authenticate() -> Optional[str]:
         El access_token (str) o ``None`` si la autenticacion falla o falta el
         client_secret.
     """
-    if not UIPATH_CLIENT_SECRET:
+    client_secret = _resolve_client_secret()
+    if not client_secret:
         logger.error(
-            "UIPATH_CLIENT_SECRET no configurado; no se puede autenticar con UiPath."
+            "client_secret de UiPath no configurado; no se puede autenticar."
         )
         return None
 
@@ -84,7 +111,7 @@ def _authenticate() -> Optional[str]:
         {
             "grant_type": "client_credentials",
             "client_id": UIPATH_CLIENT_ID,
-            "client_secret": UIPATH_CLIENT_SECRET,
+            "client_secret": client_secret,
             "scope": UIPATH_SCOPE,
         }
     ).encode("utf-8")
@@ -93,7 +120,13 @@ def _authenticate() -> Optional[str]:
         UIPATH_TOKEN_URL,
         data=form,
         method="POST",
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "application/json",
+            # UiPath (Cloudflare/WAF) rechaza (403) el User-Agent por defecto
+            # de urllib. Enviar uno explicito evita el bloqueo.
+            "User-Agent": _USER_AGENT,
+        },
     )
 
     try:
@@ -154,6 +187,7 @@ def _start_job(token: str, archivo1_b64: str, archivo2_b64: str) -> bool:
             "Content-Type": "application/json",
             "Accept": "application/json",
             "X-UIPATH-OrganizationUnitId": UIPATH_ORG_UNIT_ID,
+            "User-Agent": _USER_AGENT,
         },
     )
 

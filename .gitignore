@@ -38,3 +38,5 @@ local-server/db.json
 .idea/
 .DS_Store
 Thumbs.db
+# TypeScript build info (artefactos de build)
+*.tsbuildinfo

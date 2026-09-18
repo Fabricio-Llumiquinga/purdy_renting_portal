@@ -3,9 +3,10 @@ Transform: AWS::Serverless-2016-10-31
 Description: >
   Purdy Renting Platform - serverless infrastructure (SAM).
   Provisions DynamoDB, S3, API Gateway (Cognito + API key auth), six Lambda
-  functions with least-privilege IAM, Cognito User Pool federated with
-  Microsoft Entra ID (OIDC), SES sender identity, and a CloudFront distribution
-  for the React SPA.
+  functions with least-privilege IAM, a native Cognito User Pool (email +
+  password, admin-created users), and a CloudFront distribution for the React
+  SPA. Confirmation notifications are delivered via an external POST service
+  (webhook), not SES.
   Requirements: 1.1, 1.2, 10.1, 10.2, 10.5
 
 # --------------------------------------------------------------------------- #
@@ -19,6 +20,19 @@ Parameters:
     AllowedValues: [dev, staging, prod]
     Description: Deployment environment name (used as a resource name suffix).
 
+  EnablePitr:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: >
+      Activa Point-In-Time Recovery en DynamoDB. Recomendado "true" en prod,
+      "false" en dev/staging para evitar costo continuo de backup.
+
+  LogRetentionInDays:
+    Type: Number
+    Default: 30
+    Description: Dias de retencion de los CloudWatch Logs de las Lambdas.
+
   FrontendDomain:
     Type: String
     Default: https://app.purdyrenting.example.com
@@ -26,39 +40,22 @@ Parameters:
       Fully-qualified origin of the React SPA (scheme + host). Used for the S3
       CORS allowed origin and the Cognito callback/logout URLs.
 
-  SesSenderEmail:
+  IntegrationsSecretArn:
     Type: String
-    Default: no-reply@purdyrenting.example.com
+    Default: ""
     Description: >
-      Verified SES sender address used for submission confirmation emails.
-      NOTE: SES requires this identity to be verified out of band (via the
-      SES console, DNS records, or CreateEmailIdentity). In the SES sandbox,
-      recipient addresses must also be verified.
+      ARN del secreto en AWS Secrets Manager con las integraciones (JSON con
+      claves uipath_client_secret y notification_webhook_url). Es la fuente
+      preferida de secretos; los parametros UiPathClientSecret y
+      NotificationWebhookUrl quedan como fallback opcional (dejar vacios).
 
-  EntraClientId:
+  NotificationWebhookUrl:
     Type: String
-    Default: ENTRA_CLIENT_ID_PLACEHOLDER
-    Description: Microsoft Entra ID application (client) ID for OIDC federation.
-
-  EntraClientSecret:
-    Type: String
-    Default: ENTRA_CLIENT_SECRET_PLACEHOLDER
+    Default: ""
     NoEcho: true
-    Description: Microsoft Entra ID application client secret for OIDC federation.
-
-  EntraOidcIssuer:
-    Type: String
-    Default: https://login.microsoftonline.com/TENANT_ID_PLACEHOLDER/v2.0
     Description: >
-      Microsoft Entra ID OIDC issuer URL. Cognito uses this to discover the
-      OIDC endpoints (.well-known/openid-configuration).
-
-  CognitoDomainPrefix:
-    Type: String
-    Default: purdy-renting
-    Description: >
-      Prefix for the Cognito hosted UI domain. Must be globally unique within
-      the AWS region (final domain: {prefix}-{env}.auth.{region}.amazoncognito.com).
+      (Fallback) URL del servicio POST de notificaciones. Preferir
+      IntegrationsSecretArn. Dejar vacio si se usa Secrets Manager.
 
   # ---- UiPath Orchestrator (disparo de job desde CreateRequest) ----
   UiPathTokenUrl:
@@ -76,8 +73,8 @@ Parameters:
     Default: ""
     NoEcho: true
     Description: >
-      client_secret de UiPath. Dejar vacio en la plantilla y proveerlo en el
-      deploy (o desde Secrets Manager). NO versionar el secreto en texto plano.
+      (Fallback) client_secret de UiPath. Preferir IntegrationsSecretArn
+      (Secrets Manager). Dejar vacio si se usa Secrets Manager.
 
   UiPathScope:
     Type: String
@@ -100,11 +97,18 @@ Parameters:
     Description: X-UIPATH-OrganizationUnitId (folder) del job.
 
 # --------------------------------------------------------------------------- #
+# Conditions                                                                   #
+# --------------------------------------------------------------------------- #
+Conditions:
+  PitrEnabled: !Equals [!Ref EnablePitr, "true"]
+  HasIntegrationsSecret: !Not [!Equals [!Ref IntegrationsSecretArn, ""]]
+
+# --------------------------------------------------------------------------- #
 # Globals - defaults shared by all serverless functions.                       #
 # --------------------------------------------------------------------------- #
 Globals:
   Function:
-    Runtime: python3.11
+    Runtime: python3.14
     Timeout: 30
     MemorySize: 256
     Architectures:
@@ -149,7 +153,7 @@ Resources:
       SSESpecification:
         SSEEnabled: true
       PointInTimeRecoverySpecification:
-        PointInTimeRecoveryEnabled: true
+        PointInTimeRecoveryEnabled: !If [PitrEnabled, true, false]
 
   # ------------------------------------------------------------------------- #
   # S3 - file storage for uploaded and generated files. SSE-S3, CORS, no       #
@@ -180,22 +184,56 @@ Resources:
             ExposedHeaders:
               - ETag
             MaxAge: 3000
+      # Retencion de datos: minimo 12 meses. El volumen es bajo (max ~8
+      # archivos/mes), asi que el costo de almacenamiento es despreciable.
+      # Se pasa a Standard-IA tras 90 dias (mas barato para datos poco
+      # accedidos) y se expira a los ~13 meses (400 dias). Los multipart
+      # incompletos se limpian a los 7 dias.
+      LifecycleConfiguration:
+        Rules:
+          - Id: TransitionUploadsToIA
+            Status: Enabled
+            Prefix: uploads/
+            Transitions:
+              - StorageClass: STANDARD_IA
+                TransitionInDays: 90
+            ExpirationInDays: 400
+          - Id: TransitionGeneratedToIA
+            Status: Enabled
+            Prefix: generated/
+            Transitions:
+              - StorageClass: STANDARD_IA
+                TransitionInDays: 90
+            ExpirationInDays: 400
+          - Id: AbortIncompleteMultipartUploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
 
   # ------------------------------------------------------------------------- #
-  # Cognito - User Pool federated with Microsoft Entra ID via OIDC             #
-  # (Requirements 1.1, 1.2).                                                   #
+  # Cognito - User Pool nativo (email + password). El admin da de alta a los   #
+  # usuarios (AllowAdminCreateUserOnly) y les asigna el grupo/rol.             #
+  # El SPA administra su propio formulario de login (USER_PASSWORD_AUTH /      #
+  # SRP), sin Hosted UI ni federacion externa. (Requirements 1.1, 1.2).        #
   # ------------------------------------------------------------------------- #
   UserPool:
     Type: AWS::Cognito::UserPool
     Properties:
       UserPoolName: !Sub "purdy-renting-${EnvironmentName}"
-      # Federated identities only; no local sign-up.
+      # Solo el admin crea usuarios; no hay auto-registro publico.
       AdminCreateUserConfig:
         AllowAdminCreateUserOnly: true
       UsernameAttributes:
         - email
       AutoVerifiedAttributes:
         - email
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireUppercase: true
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: false
       Schema:
         - Name: email
           AttributeDataType: String
@@ -206,43 +244,24 @@ Resources:
           Mutable: true
           Required: false
 
-  EntraIdentityProvider:
-    Type: AWS::Cognito::UserPoolIdentityProvider
+  # Grupo/rol "solicitante". El admin asigna el usuario a este grupo tras el
+  # alta. El backend/authorizer puede leer "cognito:groups" del token.
+  SolicitantesGroup:
+    Type: AWS::Cognito::UserPoolGroup
     Properties:
+      GroupName: solicitantes
+      Description: Usuarios con rol de solicitante (crean solicitudes).
       UserPoolId: !Ref UserPool
-      ProviderName: EntraID
-      ProviderType: OIDC
-      ProviderDetails:
-        client_id: !Ref EntraClientId
-        client_secret: !Ref EntraClientSecret
-        oidc_issuer: !Ref EntraOidcIssuer
-        attributes_request_method: GET
-        authorize_scopes: "openid email profile"
-      AttributeMapping:
-        email: email
-        name: name
 
   UserPoolClient:
     Type: AWS::Cognito::UserPoolClient
-    # Ensure the IdP exists before the client references it.
-    DependsOn: EntraIdentityProvider
     Properties:
       ClientName: !Sub "purdy-renting-web-${EnvironmentName}"
       UserPoolId: !Ref UserPool
+      # SPA publico: sin client secret.
       GenerateSecret: false
       SupportedIdentityProviders:
-        - EntraID
-      AllowedOAuthFlows:
-        - code
-      AllowedOAuthFlowsUserPoolClient: true
-      AllowedOAuthScopes:
-        - openid
-        - email
-        - profile
-      CallbackURLs:
-        - !Sub "${FrontendDomain}/callback"
-      LogoutURLs:
-        - !Sub "${FrontendDomain}/login"
+        - COGNITO
       # Token lifetimes per design: 60 min access/ID, 30 day refresh.
       AccessTokenValidity: 60
       IdTokenValidity: 60
@@ -251,25 +270,12 @@ Resources:
         AccessToken: minutes
         IdToken: minutes
         RefreshToken: days
+      # Flujos de auth para login con formulario propio (email + password).
       ExplicitAuthFlows:
-        - ALLOW_REFRESH_TOKEN_AUTH
+        - ALLOW_USER_PASSWORD_AUTH
         - ALLOW_USER_SRP_AUTH
-
-  UserPoolDomain:
-    Type: AWS::Cognito::UserPoolDomain
-    Properties:
-      Domain: !Sub "${CognitoDomainPrefix}-${EnvironmentName}"
-      UserPoolId: !Ref UserPool
-
-  # ------------------------------------------------------------------------- #
-  # SES - sender identity for confirmation emails (Requirement 5).             #
-  # NOTE: creating the identity here does NOT complete verification; the       #
-  # address/domain must be verified out of band before sending succeeds.       #
-  # ------------------------------------------------------------------------- #
-  SesSenderIdentity:
-    Type: AWS::SES::EmailIdentity
-    Properties:
-      EmailIdentity: !Ref SesSenderEmail
+        - ALLOW_REFRESH_TOKEN_AUTH
+      PreventUserExistenceErrors: ENABLED
 
   # ------------------------------------------------------------------------- #
   # API Gateway - REST API with a Cognito authorizer plus API-key auth for     #
@@ -288,6 +294,10 @@ Resources:
         AllowOrigin: !Sub "'${FrontendDomain}'"
       Auth:
         DefaultAuthorizer: CognitoAuthorizer
+        # No exigir el authorizer en el preflight CORS (OPTIONS): el navegador
+        # envia OPTIONS sin token, y si se exige auth devuelve 401 y bloquea la
+        # peticion real. Los OPTIONS quedan publicos (solo devuelven headers CORS).
+        AddDefaultAuthorizerToCorsPreflight: false
         Authorizers:
           CognitoAuthorizer:
             UserPoolArn: !GetAtt UserPool.Arn
@@ -372,9 +382,11 @@ Resources:
       Handler: handlers/create_request.handler
       Environment:
         Variables:
-          SES_SENDER_EMAIL: !Ref SesSenderEmail
+          # Secretos de integraciones desde Secrets Manager (fuente preferida).
+          INTEGRATIONS_SECRET_ID: !Ref IntegrationsSecretArn
+          # Fallback opcional (vacios si se usa Secrets Manager).
+          NOTIFICATION_WEBHOOK_URL: !Ref NotificationWebhookUrl
           # UiPath Orchestrator (disparo de job tras crear la solicitud).
-          # NOTA: el client_secret debe provenir de Secrets Manager en prod.
           UIPATH_TOKEN_URL: !Ref UiPathTokenUrl
           UIPATH_CLIENT_ID: !Ref UiPathClientId
           UIPATH_CLIENT_SECRET: !Ref UiPathClientSecret
@@ -389,20 +401,21 @@ Resources:
               Action:
                 - dynamodb:PutItem
               Resource: !GetAtt RequestsTable.Arn
-            # Verify uploaded files exist (HeadObject -> s3:GetObject).
+            # Verify uploaded files exist (HeadObject -> s3:GetObject)
+            # y leerlos para enviarlos en base64 a UiPath.
             - Effect: Allow
               Action:
                 - s3:GetObject
               Resource: !Sub "${FilesBucket.Arn}/*"
-            # Send confirmation email via SES from the verified sender.
-            - Effect: Allow
-              Action:
-                - ses:SendEmail
-                - ses:SendRawEmail
-              Resource: "*"
-              Condition:
-                StringEquals:
-                  ses:FromAddress: !Ref SesSenderEmail
+        # Permiso para leer el secreto de integraciones (solo si esta definido).
+        - !If
+          - HasIntegrationsSecret
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref IntegrationsSecretArn
+          - !Ref AWS::NoValue
       Events:
         PostRequest:
           Type: Api
@@ -599,6 +612,47 @@ Resources:
               StringEquals:
                 AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${SiteDistribution.Id}"
 
+  # ------------------------------------------------------------------------- #
+  # CloudWatch Log Groups - retencion acotada para que los logs no se          #
+  # acumulen indefinidamente (control de costo). El nombre coincide con el      #
+  # que Lambda usa por convencion: /aws/lambda/<FunctionName>.                  #
+  # ------------------------------------------------------------------------- #
+  GetPresignedUrlLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/purdy-GetPresignedUrl-${EnvironmentName}"
+      RetentionInDays: !Ref LogRetentionInDays
+
+  CreateRequestLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/purdy-CreateRequest-${EnvironmentName}"
+      RetentionInDays: !Ref LogRetentionInDays
+
+  GetRequestsLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/purdy-GetRequests-${EnvironmentName}"
+      RetentionInDays: !Ref LogRetentionInDays
+
+  GetDownloadUrlLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/purdy-GetDownloadUrl-${EnvironmentName}"
+      RetentionInDays: !Ref LogRetentionInDays
+
+  UpdateStatusLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/purdy-UpdateStatus-${EnvironmentName}"
+      RetentionInDays: !Ref LogRetentionInDays
+
+  UploadGeneratedFileLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/purdy-UploadGeneratedFile-${EnvironmentName}"
+      RetentionInDays: !Ref LogRetentionInDays
+
 # --------------------------------------------------------------------------- #
 # Outputs - values needed by the frontend build and Robot integration.         #
 # --------------------------------------------------------------------------- #
@@ -622,10 +676,6 @@ Outputs:
   UserPoolClientId:
     Description: Cognito User Pool App Client ID (for the SPA).
     Value: !Ref UserPoolClient
-
-  CognitoHostedUiDomain:
-    Description: Cognito hosted UI domain.
-    Value: !Sub "https://${CognitoDomainPrefix}-${EnvironmentName}.auth.${AWS::Region}.amazoncognito.com"
 
   SiteBucketName:
     Description: S3 bucket that hosts the built React SPA.

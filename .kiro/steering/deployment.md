@@ -109,9 +109,16 @@ aws secretsmanager put-secret-value \
   `client_credentials` contra el identity server, (2) `StartJobs` (OData) en
   Orchestrator.
 - `InputArguments` (STRING JSON anidado) enviado en el `StartJobs`:
-  - `in_Archivo1Base64`: URL presignada GET del Listado de Precios.
-  - `in_Archivo2Base64`: URL presignada GET del Catalogo DAI.
+  - `in_Archivo1Base64`: URL presignada GET del **Listado de Precios**
+    (proviene de `listadoPreciosS3Key`).
+  - `in_Archivo2Base64`: URL presignada GET del **Listado DAI**
+    (proviene de `daiS3Key`).
   - `in_NombreEmpresa`: nombre de la empresa del formulario.
+  - `in_IdSolicitud`: `requestId` de la solicitud. El robot lo usa para
+    reportar el resultado via `POST /requests/{in_IdSolicitud}/result`,
+    cerrando el ciclo de seguimiento.
+- MAPEO IMPORTANTE (no invertir): Listado de Precios -> `in_Archivo1Base64`;
+  Listado DAI -> `in_Archivo2Base64`.
 - El disparo es **best-effort**: si falla, NO bloquea la creacion de la
   solicitud (el registro ya existe y el usuario recibio confirmacion).
 

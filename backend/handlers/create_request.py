@@ -159,7 +159,12 @@ def _send_confirmation_email(
 
 
 def _trigger_uipath_job(
-    *, bucket: str, listado_precios_key: str, dai_key: str, request_id: str
+    *,
+    bucket: str,
+    listado_precios_key: str,
+    dai_key: str,
+    request_id: str,
+    nombre_empresa: str,
 ) -> None:
     """Dispara el job de UiPath con los dos archivos en base64 (best-effort).
 
@@ -181,7 +186,7 @@ def _trigger_uipath_job(
 
         from services.uipath_service import trigger_job
 
-        ok = trigger_job(archivo1_b64, archivo2_b64)
+        ok = trigger_job(archivo1_b64, archivo2_b64, nombre_empresa)
         if ok:
             logger.info("Job de UiPath disparado para request %s.", request_id)
         else:
@@ -292,6 +297,7 @@ def handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
         listado_precios_key=listado_precios_key,
         dai_key=dai_key,
         request_id=request_id,
+        nombre_empresa=company,
     )
 
     message = (

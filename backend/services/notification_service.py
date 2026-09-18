@@ -25,6 +25,7 @@ Requirements covered: 5.1, 5.2, 5.3, 5.4, 5.5
 
 from __future__ import annotations
 
+import html
 import json
 import logging
 import os
@@ -75,22 +76,112 @@ def _build_subject(company_code: str) -> str:
     return f"Listado Precios - {company_code}"
 
 
+def _esc(value: str) -> str:
+    """Escapa texto para insertarlo de forma segura en el HTML del correo."""
+    return html.escape(str(value or ""), quote=True)
+
+
 def _build_html_body(
-    user_name: str, submission_date: str, company_name: str
+    user_name: str,
+    submission_date: str,
+    company_name: str,
+    company_code: str = "",
+    enlace_url: str = "",
 ) -> str:
-    """Build the Spanish HTML email body (Requirement 5.3)."""
+    """Construye el cuerpo HTML ejecutivo del correo (Requirement 5.3).
+
+    Diseño de correo (compatible con Outlook/Gmail): layout basado en tablas y
+    estilos inline, con cabecera de marca, tarjeta de detalles y pie de pagina.
+    Todos los valores dinamicos se escapan.
+    """
+    user = _esc(user_name)
+    company = _esc(company_name)
+    code = _esc(company_code)
+    date = _esc(submission_date)
+    link = _esc(enlace_url)
+
+    # Boton opcional de seguimiento (solo si hay enlace).
+    cta_block = ""
+    if enlace_url:
+        cta_block = (
+            '<tr><td style="padding:8px 0 4px 0;">'
+            f'<a href="{link}" target="_blank" '
+            'style="display:inline-block;background-color:#AF2D76;color:#ffffff;'
+            'text-decoration:none;font-weight:600;font-size:14px;'
+            'padding:12px 22px;border-radius:8px;">Ver seguimiento de la solicitud</a>'
+            "</td></tr>"
+        )
+
+    # Chip con el codigo de empresa (solo si viene).
+    code_chip = ""
+    if company_code:
+        code_chip = (
+            f'&nbsp;<span style="display:inline-block;background-color:#F6E4EE;'
+            'color:#8E2360;font-size:12px;font-weight:600;padding:2px 8px;'
+            f'border-radius:10px;">{code}</span>'
+        )
+
     return (
-        "<div>"
-        f"<p>Estimado(a) {user_name},</p>"
-        "<p>Su solicitud de listado de precios ha sido recibida exitosamente.</p>"
-        "<ul>"
-        f"<li><strong>Empresa:</strong> {company_name}</li>"
-        f"<li><strong>Fecha de envío:</strong> {submission_date}</li>"
-        "</ul>"
-        "<p>Le notificaremos cuando el listado generado esté disponible.</p>"
-        "<p>Este es un mensaje automático, por favor no responda a este correo.</p>"
-        "<p>Saludos cordiales,<br/>Plataforma Purdy Renting</p>"
-        "</div>"
+        '<!DOCTYPE html>'
+        '<html lang="es"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1.0">'
+        '<title>Confirmacion de solicitud</title></head>'
+        '<body style="margin:0;padding:0;background-color:#FBF4F7;'
+        'font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#2B2B2B;">'
+        # Contenedor centrado
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        'style="background-color:#FBF4F7;padding:24px 12px;"><tr><td align="center">'
+        '<table role="presentation" width="600" cellpadding="0" cellspacing="0" '
+        'style="max-width:600px;width:100%;background-color:#ffffff;'
+        'border-radius:14px;overflow:hidden;'
+        'box-shadow:0 2px 10px rgba(43,43,43,0.08);">'
+        # Cabecera con degradado de marca
+        '<tr><td style="background:linear-gradient(120deg,#AF2D76 0%,#C74C63 45%,'
+        '#E39D3C 100%);padding:24px 32px;">'
+        '<div style="color:#ffffff;font-size:22px;font-weight:700;'
+        'letter-spacing:1px;">ANY<span style="color:#F6E4EE;">2</span>CLOUD</div>'
+        '<div style="color:#F6E4EE;font-size:13px;margin-top:2px;">'
+        'Plataforma Purdy Renting</div>'
+        '</td></tr>'
+        # Cuerpo
+        '<tr><td style="padding:32px;">'
+        '<h1 style="margin:0 0 4px 0;font-size:20px;color:#2B2B2B;">'
+        'Solicitud recibida</h1>'
+        '<p style="margin:0 0 20px 0;font-size:14px;color:#7A6B73;">'
+        'Su solicitud de listado de precios se registro correctamente.</p>'
+        f'<p style="margin:0 0 16px 0;font-size:15px;">Estimado(a) '
+        f'<strong>{user}</strong>,</p>'
+        '<p style="margin:0 0 20px 0;font-size:15px;line-height:1.5;">'
+        'Hemos recibido su solicitud exitosamente. A continuacion el detalle:</p>'
+        # Tarjeta de detalles
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        'style="background-color:#FBF4F7;border:1px solid #ECE1E8;'
+        'border-radius:12px;padding:4px 0;margin-bottom:20px;">'
+        '<tr><td style="padding:14px 18px;font-size:13px;color:#7A6B73;'
+        'width:140px;">Empresa</td>'
+        f'<td style="padding:14px 18px;font-size:14px;font-weight:600;'
+        f'color:#2B2B2B;">{company}{code_chip}</td></tr>'
+        '<tr><td style="padding:14px 18px;font-size:13px;color:#7A6B73;'
+        'border-top:1px solid #ECE1E8;">Fecha de envio</td>'
+        f'<td style="padding:14px 18px;font-size:14px;font-weight:600;'
+        f'color:#2B2B2B;border-top:1px solid #ECE1E8;">{date}</td></tr>'
+        '</table>'
+        # CTA opcional
+        '<table role="presentation" cellpadding="0" cellspacing="0">'
+        f'{cta_block}</table>'
+        '<p style="margin:20px 0 0 0;font-size:14px;line-height:1.5;color:#2B2B2B;">'
+        'Le notificaremos cuando el listado generado este disponible.</p>'
+        '</td></tr>'
+        # Pie
+        '<tr><td style="padding:20px 32px;background-color:#FBF4F7;'
+        'border-top:1px solid #ECE1E8;">'
+        '<p style="margin:0;font-size:12px;color:#7A6B73;line-height:1.5;">'
+        'Este es un mensaje automatico, por favor no responda a este correo.<br>'
+        'Saludos cordiales, Plataforma Purdy Renting.</p>'
+        '</td></tr>'
+        '</table>'
+        '</td></tr></table>'
+        '</body></html>'
     )
 
 
@@ -163,7 +254,13 @@ def send_submission_confirmation(
     # --- Construir el payload ---------------------------------------------- #
     formatted_date = _format_submission_date(submission_date)
     subject = _build_subject(company_code)
-    html_body = _build_html_body(user_name, formatted_date, company_name)
+    html_body = _build_html_body(
+        user_name,
+        formatted_date,
+        company_name,
+        company_code=company_code,
+        enlace_url=enlace_url or "",
+    )
 
     payload = {
         "destinatario": recipient_email,

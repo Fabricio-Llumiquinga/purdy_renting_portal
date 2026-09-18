@@ -151,20 +151,27 @@ def _authenticate() -> Optional[str]:
 # --------------------------------------------------------------------------- #
 
 
-def _start_job(token: str, archivo1_b64: str, archivo2_b64: str) -> bool:
+def _start_job(
+    token: str, archivo1_b64: str, archivo2_b64: str, nombre_empresa: str
+) -> bool:
     """Dispara el job de UiPath con los dos archivos en base64.
 
     Args:
         token: access_token Bearer obtenido en _authenticate().
         archivo1_b64: Listado de Precios en base64 (in_Archivo1Base64).
         archivo2_b64: Catalogo DAI en base64 (in_Archivo2Base64).
+        nombre_empresa: Nombre de la empresa del formulario (in_NombreEmpresa).
 
     Returns:
         True si Orchestrator acepto la peticion (2xx), False en caso contrario.
     """
     # InputArguments debe ser un STRING JSON (JSON anidado), segun el contrato.
     input_arguments = json.dumps(
-        {"in_Archivo1Base64": archivo1_b64, "in_Archivo2Base64": archivo2_b64}
+        {
+            "in_Archivo1Base64": archivo1_b64,
+            "in_Archivo2Base64": archivo2_b64,
+            "in_NombreEmpresa": nombre_empresa,
+        }
     )
 
     body = json.dumps(
@@ -217,7 +224,9 @@ def _start_job(token: str, archivo1_b64: str, archivo2_b64: str) -> bool:
 # --------------------------------------------------------------------------- #
 
 
-def trigger_job(archivo1_b64: str, archivo2_b64: str) -> bool:
+def trigger_job(
+    archivo1_b64: str, archivo2_b64: str, nombre_empresa: str = ""
+) -> bool:
     """Autentica y dispara el job de UiPath con los dos archivos en base64.
 
     Best-effort: nunca lanza excepcion. Devuelve True solo si ambos pasos
@@ -226,6 +235,7 @@ def trigger_job(archivo1_b64: str, archivo2_b64: str) -> bool:
     Args:
         archivo1_b64: Listado de Precios en base64.
         archivo2_b64: Catalogo DAI en base64.
+        nombre_empresa: Nombre de la empresa del formulario (in_NombreEmpresa).
     """
     if not archivo1_b64 or not archivo2_b64:
         logger.error("Faltan archivos base64 para disparar el job de UiPath.")
@@ -235,4 +245,4 @@ def trigger_job(archivo1_b64: str, archivo2_b64: str) -> bool:
     if not token:
         return False
 
-    return _start_job(token, archivo1_b64, archivo2_b64)
+    return _start_job(token, archivo1_b64, archivo2_b64, nombre_empresa)

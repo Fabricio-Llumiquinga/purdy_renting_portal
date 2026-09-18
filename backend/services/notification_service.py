@@ -135,12 +135,15 @@ def _build_html_body(
         'style="max-width:600px;width:100%;background-color:#ffffff;'
         'border-radius:14px;overflow:hidden;'
         'box-shadow:0 2px 10px rgba(43,43,43,0.08);">'
-        # Cabecera con degradado de marca
-        '<tr><td style="background:linear-gradient(120deg,#AF2D76 0%,#C74C63 45%,'
-        '#E39D3C 100%);padding:24px 32px;">'
+        # Cabecera con color de marca. Se usa bgcolor (atributo HTML) como
+        # fallback solido para clientes que no soportan gradientes CSS
+        # (Outlook, varios webmail); el gradiente se aplica encima donde exista.
+        '<tr><td bgcolor="#AF2D76" style="background-color:#AF2D76;'
+        'background:linear-gradient(120deg,#AF2D76 0%,#C74C63 45%,#E39D3C 100%);'
+        'padding:24px 32px;">'
         '<div style="color:#ffffff;font-size:22px;font-weight:700;'
-        'letter-spacing:1px;">ANY<span style="color:#F6E4EE;">2</span>CLOUD</div>'
-        '<div style="color:#F6E4EE;font-size:13px;margin-top:2px;">'
+        'letter-spacing:1px;">ANY<span style="color:#FBEEDD;">2</span>CLOUD</div>'
+        '<div style="color:#ffffff;font-size:13px;margin-top:2px;">'
         'Plataforma Purdy Renting</div>'
         '</td></tr>'
         # Cuerpo

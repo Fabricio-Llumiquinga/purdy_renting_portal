@@ -92,6 +92,14 @@ export function RequestRow({ request }: RequestRowProps) {
         <span className={`status-badge ${STATUS_CLASS[request.status]}`}>
           {request.status}
         </span>
+        {request.detail && (
+          <p className="request-row__detail" title={request.detail}>
+            {request.detail}
+          </p>
+        )}
+        {request.status === 'Failed' && request.typeFailed && (
+          <p className="request-row__failtype">{request.typeFailed}</p>
+        )}
       </td>
     </tr>
   );

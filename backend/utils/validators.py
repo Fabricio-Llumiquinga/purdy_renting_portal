@@ -35,6 +35,20 @@ VALID_STATUSES: set[str] = {"Procesando", "Procesado", "Failed"}
 #: Statuses that are terminal (no further transitions allowed).
 TERMINAL_STATUSES: set[str] = {"Procesado", "Failed"}
 
+# --- Endpoint de resultado (POST /requests/{id}/result) -------------------- #
+#: Valores de "status" que el Robot envia al cerrar la solicitud, y su mapeo al
+#: estado interno usado por el frontend/seguimiento.
+RESULT_STATUS_MAP: dict[str, str] = {
+    "Success": "Procesado",
+    "Failed": "Failed",
+}
+
+#: Valores permitidos de "type_failed" que el Robot puede reportar.
+VALID_FAILURE_TYPES: set[str] = {"Business Exception", "IT Exception", ""}
+
+#: Longitud maxima del campo "detail" del resultado.
+MAX_DETAIL_LENGTH: int = 1000
+
 #: Maximum length of the Robot observation field.
 MAX_OBSERVATION_LENGTH: int = 500
 

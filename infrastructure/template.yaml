@@ -530,6 +530,82 @@ Resources:
               Authorizer: NONE
               ApiKeyRequired: true
 
+  # --- Cierre de solicitud (resultado del proceso RPA) --------------------- #
+  # Endpoint unico que cierra la solicitud: status + detail + type_failed +
+  # archivo generado (base64). Usa una API KEY PROPIA (ResultApiKey), distinta
+  # de la de los demas endpoints Robot, para poder rotarla/controlarla aparte.
+  SubmitResultFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "purdy-SubmitResult-${EnvironmentName}"
+      CodeUri: ../backend
+      Handler: handlers/submit_result.handler
+      # Puede recibir archivo base64 hasta 50 MB; mas memoria/tiempo.
+      MemorySize: 512
+      Timeout: 60
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:UpdateItem
+              Resource: !GetAtt RequestsTable.Arn
+            - Effect: Allow
+              Action:
+                - s3:PutObject
+              Resource: !Sub "${FilesBucket.Arn}/*"
+      Events:
+        PostResult:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /requests/{id}/result
+            Method: post
+            Auth:
+              Authorizer: NONE
+              ApiKeyRequired: true
+
+  SubmitResultLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/purdy-SubmitResult-${EnvironmentName}"
+      RetentionInDays: !Ref LogRetentionInDays
+
+  # --- API key propia para el servicio de resultado ----------------------- #
+  # Usage plan separado del auto-generado por SAM, ligado al mismo stage del
+  # API. Permite dar/rotar una credencial exclusiva para POST /result.
+  ResultApiKey:
+    Type: AWS::ApiGateway::ApiKey
+    # El stage debe existir antes de asociar el usage plan.
+    DependsOn: ApiStage
+    Properties:
+      Name: !Sub "purdy-renting-result-key-${EnvironmentName}"
+      Description: API key exclusiva para POST /requests/{id}/result.
+      Enabled: true
+
+  ResultUsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    DependsOn: ApiStage
+    Properties:
+      UsagePlanName: !Sub "purdy-renting-result-plan-${EnvironmentName}"
+      Description: Usage plan para el endpoint de resultado (RPA).
+      ApiStages:
+        - ApiId: !Ref Api
+          Stage: !Ref EnvironmentName
+      Throttle:
+        BurstLimit: 10
+        RateLimit: 5
+      Quota:
+        Limit: 5000
+        Period: DAY
+
+  ResultUsagePlanKey:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Properties:
+      KeyId: !Ref ResultApiKey
+      KeyType: API_KEY
+      UsagePlanId: !Ref ResultUsagePlan
+
   # ------------------------------------------------------------------------- #
   # CloudFront + site bucket for the built React SPA.                          #
   # The site bucket is separate from the file-storage bucket. Access is        #
@@ -690,3 +766,9 @@ Outputs:
       ID of the API key auto-created by the SAM usage plan for the Robot
       endpoints. Retrieve the secret value via the API Gateway console/CLI.
     Value: !Ref ApiApiKey
+
+  ResultApiKeyId:
+    Description: >
+      ID de la API key propia para POST /requests/{id}/result. Obtener el valor
+      secreto con: aws apigateway get-api-key --api-key <id> --include-value.
+    Value: !Ref ResultApiKey

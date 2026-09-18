@@ -160,8 +160,33 @@ via env `UIPATH_USER_AGENT`). No quitarlo o UiPath devolvera 403 en auth.
   `data.requests`. Mantener este contrato o ajustar ambos lados.
 - `GET /requests/{id}/download` devuelve `{ downloadUrl, fileName }`.
 - `POST /requests` devuelve `{ requestId, message }`.
+- `GET /requests` incluye tambien `detail` y `typeFailed` (resultado del RPA)
+  para alimentar el modulo de seguimiento.
 - Endpoints de Robot (`PUT /requests/{id}/status`, `POST /requests/{id}/file`)
-  usan API key (no Cognito), con usage plan (quota 10k/dia, throttle 10 rps).
+  usan API key (no Cognito), con el usage plan auto-generado por SAM
+  (`ApiApiKey`, quota 10k/dia, throttle 10 rps).
+
+### Endpoint de cierre de solicitud (resultado del RPA)
+
+- `POST /requests/{id}/result` (handler `backend/handlers/submit_result.py`)
+  cierra la solicitud en una sola llamada y alimenta el seguimiento.
+- Auth: **API key PROPIA** (`ResultApiKey` / `ResultUsagePlan`), distinta de la
+  de los demas endpoints Robot, para poder rotarla aparte. Se envia en el header
+  `x-api-key`. Throttle 5 rps / burst 10, quota 5000/dia.
+- Body (JSON):
+  - `status`: `"Success"` | `"Failed"` (obligatorio). Se mapea a estado interno
+    via `RESULT_STATUS_MAP`: `Success -> Procesado`, `Failed -> Failed`.
+  - `detail`: texto descriptivo (opcional, <= 1000 chars).
+  - `type_failed`: `"Business Exception"` | `"IT Exception"` | `""` (opcional).
+  - `archivo_generado`: contenido del archivo generado en base64 (opcional;
+    tipico en exito). Si viene, `file_name` es obligatorio.
+  - `file_name`: nombre del archivo generado (requerido si hay archivo). Se
+    guarda en S3 como `generated/{id}/{file_name}` con SSE.
+- Persiste `status`, `detail`, `typeFailed`, `updatedAt` y, si hay archivo,
+  `generatedFileName`/`generatedFileS3Key`.
+- No permite re-cerrar una solicitud ya terminal (Procesado/Failed) -> 409.
+- Obtener el valor de la API key: output `ResultApiKeyId` del stack ->
+  `aws apigateway get-api-key --api-key <id> --include-value`.
 
 ## Control de costo
 

@@ -13,6 +13,9 @@ export interface Request {
   generatedFileS3Key: string | null;
   status: "Pendiente de Procesar" | "Procesando" | "Procesado" | "Failed";
   observation: string | null;
+  // Resultado del proceso RPA (endpoint POST /requests/{id}/result).
+  detail: string | null;
+  typeFailed: "Business Exception" | "IT Exception" | "" | null;
   createdAt: string; // ISO 8601
   updatedAt: string; // ISO 8601
 }

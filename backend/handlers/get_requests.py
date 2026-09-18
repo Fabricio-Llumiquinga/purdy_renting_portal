@@ -42,6 +42,9 @@ _RESPONSE_FIELDS = (
     "generatedFileS3Key",
     "status",
     "observation",
+    # Resultado del proceso RPA (POST /requests/{id}/result) para seguimiento.
+    "detail",
+    "typeFailed",
     "createdAt",
     "updatedAt",
 )

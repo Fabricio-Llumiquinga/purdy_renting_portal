@@ -186,8 +186,9 @@ def _trigger_uipath_job(
     ya recibio confirmacion).
 
     - in_Archivo1Base64 = URL presignada del Listado de Precios
-    - in_Archivo2Base64 = URL presignada del Catalogo DAI
+    - in_Archivo2Base64 = URL presignada del Listado DAI
     - in_NombreEmpresa  = nombre de la empresa del formulario
+    - in_IdSolicitud    = requestId de la solicitud (para el POST /result)
     """
     try:
         archivo1_url = _presign_get_url(bucket, listado_precios_key)
@@ -201,7 +202,7 @@ def _trigger_uipath_job(
 
         from services.uipath_service import trigger_job
 
-        ok = trigger_job(archivo1_url, archivo2_url, nombre_empresa)
+        ok = trigger_job(archivo1_url, archivo2_url, nombre_empresa, request_id)
         if ok:
             logger.info("Job de UiPath disparado para request %s.", request_id)
         else:

@@ -152,7 +152,11 @@ def _authenticate() -> Optional[str]:
 
 
 def _start_job(
-    token: str, archivo1_url: str, archivo2_url: str, nombre_empresa: str
+    token: str,
+    archivo1_url: str,
+    archivo2_url: str,
+    nombre_empresa: str,
+    id_solicitud: str,
 ) -> bool:
     """Dispara el job de UiPath con las URLs de descarga de los dos archivos.
 
@@ -167,8 +171,10 @@ def _start_job(
     Args:
         token: access_token Bearer obtenido en _authenticate().
         archivo1_url: URL presignada del Listado de Precios (in_Archivo1Base64).
-        archivo2_url: URL presignada del Catalogo DAI (in_Archivo2Base64).
+        archivo2_url: URL presignada del Listado DAI (in_Archivo2Base64).
         nombre_empresa: Nombre de la empresa del formulario (in_NombreEmpresa).
+        id_solicitud: requestId de la solicitud (in_IdSolicitud); el robot lo usa
+            para reportar el resultado via POST /requests/{id}/result.
 
     Returns:
         True si Orchestrator acepto la peticion (2xx), False en caso contrario.
@@ -179,6 +185,7 @@ def _start_job(
             "in_Archivo1Base64": archivo1_url,
             "in_Archivo2Base64": archivo2_url,
             "in_NombreEmpresa": nombre_empresa,
+            "in_IdSolicitud": id_solicitud,
         }
     )
 
@@ -233,7 +240,10 @@ def _start_job(
 
 
 def trigger_job(
-    archivo1_url: str, archivo2_url: str, nombre_empresa: str = ""
+    archivo1_url: str,
+    archivo2_url: str,
+    nombre_empresa: str = "",
+    id_solicitud: str = "",
 ) -> bool:
     """Autentica y dispara el job de UiPath con las URLs de los dos archivos.
 
@@ -242,8 +252,9 @@ def trigger_job(
 
     Args:
         archivo1_url: URL presignada del Listado de Precios.
-        archivo2_url: URL presignada del Catalogo DAI.
+        archivo2_url: URL presignada del Listado DAI.
         nombre_empresa: Nombre de la empresa del formulario (in_NombreEmpresa).
+        id_solicitud: requestId de la solicitud (in_IdSolicitud).
     """
     if not archivo1_url or not archivo2_url:
         logger.error("Faltan URLs de archivos para disparar el job de UiPath.")
@@ -253,4 +264,4 @@ def trigger_job(
     if not token:
         return False
 
-    return _start_job(token, archivo1_url, archivo2_url, nombre_empresa)
+    return _start_job(token, archivo1_url, archivo2_url, nombre_empresa, id_solicitud)

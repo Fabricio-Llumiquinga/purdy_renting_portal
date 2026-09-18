@@ -13,7 +13,6 @@ Requirements covered: 2.7, 3.1, 4.1, 4.2, 4.3, 5.1, 10.4
 
 from __future__ import annotations
 
-import base64
 import json
 import logging
 import os
@@ -39,6 +38,10 @@ REQUESTS_TABLE_ENV = "REQUESTS_TABLE"
 FILES_BUCKET_ENV = "FILES_BUCKET"
 METADATA_SK = "METADATA"
 UPLOAD_KEY_PREFIX = "uploads/"
+
+#: Vigencia (segundos) de las URLs presignadas que se envian a UiPath para que
+#: el robot descargue los archivos. 6 horas de margen para la ejecucion del job.
+UIPATH_URL_EXPIRY_SECONDS = int(os.environ.get("UIPATH_URL_EXPIRY_SECONDS", "21600"))
 
 _dynamodb_resource = None
 _s3_client = None
@@ -120,14 +123,22 @@ def _verify_s3_object(
     return (True, None)
 
 
-def _read_s3_as_base64(bucket: str, s3_key: str) -> Optional[str]:
-    """Descarga un objeto de S3 y lo devuelve codificado en base64 (str)."""
+def _presign_get_url(bucket: str, s3_key: str) -> Optional[str]:
+    """Genera una URL presignada GET para que UiPath descargue el objeto.
+
+    Se usa en vez de enviar el contenido en base64 porque el campo
+    InputArguments de UiPath esta limitado a 10.000 caracteres. La URL es
+    autocontenida (firma en la query), expira, y no requiere credenciales AWS
+    en el robot.
+    """
     try:
-        obj = _get_s3_client().get_object(Bucket=bucket, Key=s3_key)
-        raw = obj["Body"].read()
-        return base64.b64encode(raw).decode("ascii")
+        return _get_s3_client().generate_presigned_url(
+            ClientMethod="get_object",
+            Params={"Bucket": bucket, "Key": s3_key},
+            ExpiresIn=UIPATH_URL_EXPIRY_SECONDS,
+        )
     except Exception:  # noqa: BLE001
-        logger.exception("No se pudo leer/base64 el objeto S3 %s", s3_key)
+        logger.exception("No se pudo generar URL presignada para %s", s3_key)
         return None
 
 
@@ -166,27 +177,31 @@ def _trigger_uipath_job(
     request_id: str,
     nombre_empresa: str,
 ) -> None:
-    """Dispara el job de UiPath con los dos archivos en base64 (best-effort).
+    """Dispara el job de UiPath con URLs de descarga de los archivos (best-effort).
 
-    Descarga ambos objetos de S3, los codifica en base64 y llama al servicio de
-    UiPath. Cualquier fallo se registra pero NO bloquea la creacion de la
-    solicitud (el usuario ya recibio confirmacion y el registro ya existe).
+    Genera una URL presignada GET por cada objeto de S3 y llama al servicio de
+    UiPath. Se envian URLs (no el contenido base64) porque InputArguments de
+    UiPath esta limitado a 10.000 caracteres. Cualquier fallo se registra pero
+    NO bloquea la creacion de la solicitud (el registro ya existe y el usuario
+    ya recibio confirmacion).
 
-    - in_Archivo1Base64 = Listado de Precios
-    - in_Archivo2Base64 = Catalogo DAI
+    - in_Archivo1Base64 = URL presignada del Listado de Precios
+    - in_Archivo2Base64 = URL presignada del Catalogo DAI
+    - in_NombreEmpresa  = nombre de la empresa del formulario
     """
     try:
-        archivo1_b64 = _read_s3_as_base64(bucket, listado_precios_key)
-        archivo2_b64 = _read_s3_as_base64(bucket, dai_key)
-        if not archivo1_b64 or not archivo2_b64:
+        archivo1_url = _presign_get_url(bucket, listado_precios_key)
+        archivo2_url = _presign_get_url(bucket, dai_key)
+        if not archivo1_url or not archivo2_url:
             logger.error(
-                "No se pudo preparar base64 para UiPath (request %s).", request_id
+                "No se pudieron generar URLs presignadas para UiPath (request %s).",
+                request_id,
             )
             return
 
         from services.uipath_service import trigger_job
 
-        ok = trigger_job(archivo1_b64, archivo2_b64, nombre_empresa)
+        ok = trigger_job(archivo1_url, archivo2_url, nombre_empresa)
         if ok:
             logger.info("Job de UiPath disparado para request %s.", request_id)
         else:
@@ -291,7 +306,7 @@ def handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
         created_at=created_at,
     )
 
-    # Disparo del job de UiPath con los archivos en base64 (best-effort).
+    # Disparo del job de UiPath con URLs presignadas de los archivos (best-effort).
     _trigger_uipath_job(
         bucket=bucket,
         listado_precios_key=listado_precios_key,

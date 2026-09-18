@@ -152,14 +152,22 @@ def _authenticate() -> Optional[str]:
 
 
 def _start_job(
-    token: str, archivo1_b64: str, archivo2_b64: str, nombre_empresa: str
+    token: str, archivo1_url: str, archivo2_url: str, nombre_empresa: str
 ) -> bool:
-    """Dispara el job de UiPath con los dos archivos en base64.
+    """Dispara el job de UiPath con las URLs de descarga de los dos archivos.
+
+    Se envian URLs presignadas de S3 (no el contenido base64), porque el campo
+    InputArguments de UiPath esta limitado a 10.000 caracteres y el contenido
+    en base64 lo excede. El robot descarga los archivos haciendo GET a las URLs.
+
+    NOTA: se conservan los nombres de argumento del bot existente
+    (in_Archivo1Base64 / in_Archivo2Base64); su CONTENIDO ahora es una URL de
+    descarga, no base64. El workflow debe descargar desde esa URL.
 
     Args:
         token: access_token Bearer obtenido en _authenticate().
-        archivo1_b64: Listado de Precios en base64 (in_Archivo1Base64).
-        archivo2_b64: Catalogo DAI en base64 (in_Archivo2Base64).
+        archivo1_url: URL presignada del Listado de Precios (in_Archivo1Base64).
+        archivo2_url: URL presignada del Catalogo DAI (in_Archivo2Base64).
         nombre_empresa: Nombre de la empresa del formulario (in_NombreEmpresa).
 
     Returns:
@@ -168,8 +176,8 @@ def _start_job(
     # InputArguments debe ser un STRING JSON (JSON anidado), segun el contrato.
     input_arguments = json.dumps(
         {
-            "in_Archivo1Base64": archivo1_b64,
-            "in_Archivo2Base64": archivo2_b64,
+            "in_Archivo1Base64": archivo1_url,
+            "in_Archivo2Base64": archivo2_url,
             "in_NombreEmpresa": nombre_empresa,
         }
     )
@@ -225,24 +233,24 @@ def _start_job(
 
 
 def trigger_job(
-    archivo1_b64: str, archivo2_b64: str, nombre_empresa: str = ""
+    archivo1_url: str, archivo2_url: str, nombre_empresa: str = ""
 ) -> bool:
-    """Autentica y dispara el job de UiPath con los dos archivos en base64.
+    """Autentica y dispara el job de UiPath con las URLs de los dos archivos.
 
     Best-effort: nunca lanza excepcion. Devuelve True solo si ambos pasos
     (auth + start) fueron exitosos.
 
     Args:
-        archivo1_b64: Listado de Precios en base64.
-        archivo2_b64: Catalogo DAI en base64.
+        archivo1_url: URL presignada del Listado de Precios.
+        archivo2_url: URL presignada del Catalogo DAI.
         nombre_empresa: Nombre de la empresa del formulario (in_NombreEmpresa).
     """
-    if not archivo1_b64 or not archivo2_b64:
-        logger.error("Faltan archivos base64 para disparar el job de UiPath.")
+    if not archivo1_url or not archivo2_url:
+        logger.error("Faltan URLs de archivos para disparar el job de UiPath.")
         return False
 
     token = _authenticate()
     if not token:
         return False
 
-    return _start_job(token, archivo1_b64, archivo2_b64, nombre_empresa)
+    return _start_job(token, archivo1_url, archivo2_url, nombre_empresa)

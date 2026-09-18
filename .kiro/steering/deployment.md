@@ -107,10 +107,27 @@ aws secretsmanager put-secret-value \
 
 - Flujo de 2 pasos en `backend/services/uipath_service.py`: (1) auth
   `client_credentials` contra el identity server, (2) `StartJobs` (OData) en
-  Orchestrator, enviando los 2 archivos como base64 en `in_Archivo1Base64` e
-  `in_Archivo2Base64`.
+  Orchestrator.
+- `InputArguments` (STRING JSON anidado) enviado en el `StartJobs`:
+  - `in_Archivo1Base64`: URL presignada GET del Listado de Precios.
+  - `in_Archivo2Base64`: URL presignada GET del Catalogo DAI.
+  - `in_NombreEmpresa`: nombre de la empresa del formulario.
 - El disparo es **best-effort**: si falla, NO bloquea la creacion de la
   solicitud (el registro ya existe y el usuario recibio confirmacion).
+
+### IMPORTANTE: se envian URLs presignadas, NO base64
+
+El campo `InputArguments` de UiPath esta limitado a **10.000 caracteres**. El
+contenido de los archivos en base64 lo excede (UiPath responde HTTP 400:
+"InputArguments must be a string ... maximum length of '10000'"). Por eso
+`create_request.py` genera **URLs presignadas GET** de S3 (vigencia por defecto
+6h, env `UIPATH_URL_EXPIRY_SECONDS`) y las envia en los argumentos.
+
+Los NOMBRES de argumento se conservan (`in_Archivo1Base64` /
+`in_Archivo2Base64`) para no cambiar el contrato del bot existente, pero su
+CONTENIDO es ahora una URL de descarga. El workflow de UiPath debe **descargar
+el archivo con un GET a la URL**, no decodificar base64. Las URLs no requieren
+credenciales AWS (la firma va en la query) y expiran.
 
 ### IMPORTANTE: User-Agent obligatorio
 
